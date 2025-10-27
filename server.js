@@ -22,6 +22,6 @@ app.use("/api/chat", chatRouter);
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
-app.listen(PORT, () => {
-  console.log(`[backend] listening on :${PORT}`);
+app.listen(process.env.PORT || 10000, () => {
+  console.log(`[backend] listening on :${process.env.PORT || 10000}`);
 });
