@@ -1,95 +1,79 @@
 import { Router } from "express";
 import multer from "multer";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import fetch from "node-fetch";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = Router();
 
-/**
- * Llama al modelo Gemini actualizado.
- */
+// --- Llamada REST a Gemini v1 (sin SDK) ---
 async function askGemini(systemInstruction, userText) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("⚠️ GEMINI_API_KEY no configurada en Render.");
 
-  try {
-    // Inicializar cliente Gemini
-    const genAI = new GoogleGenerativeAI(apiKey);
+  const endpoint = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-    // Usar el modelo estable más reciente
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-
-    // Construir el prompt
-    const prompt = `${systemInstruction}
+  const prompt = `${systemInstruction}
 
 Usuario: ${userText}
 
 Tu respuesta:`;
 
-    // Generar respuesta
-    const result = await model.generateContent([prompt]);
-    const text = result.response.text();
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }]
+      }
+    ]
+  };
 
-    if (!text || text.trim() === "") {
-      return "⚠️ Gemini no devolvió contenido. Revisá tu clave o los límites de uso.";
-    }
+  const resp = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 
-    return text;
-  } catch (err) {
-    console.error("❌ Error en Gemini:", err);
-    if (err.message?.includes("API_KEY_INVALID")) {
-      throw new Error(
-        "Tu API key de Gemini es inválida o está expirada. Creá una nueva en https://aistudio.google.com/app/apikey"
-      );
-    }
-    if (err.message?.includes("404") || err.message?.includes("not found")) {
-      throw new Error(
-        "El modelo solicitado no existe o no está habilitado. Probá con 'gemini-1.5-flash-latest'."
-      );
-    }
-    throw err;
+  const data = await resp.json();
+
+  if (!resp.ok) {
+    const msg = data?.error?.message || JSON.stringify(data);
+    throw new Error(`Gemini API error ${resp.status}: ${msg}`);
   }
+
+  const text =
+    data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+    data?.candidates?.[0]?.content?.parts?.map(p => p?.text).filter(Boolean)?.join("\n") ||
+    "";
+
+  return text || "⚠️ Gemini no devolvió contenido.";
 }
 
-/**
- * Endpoint principal: POST /api/chat
- */
 router.post("/", upload.array("files"), async (req, res) => {
   try {
     const { messages = [], attachments = [] } = req.body ?? {};
-    const lastUser =
-      [...messages].reverse().find((m) => m.role === "user")?.content || "";
+    const lastUser = [...messages].reverse().find(m => m.role === "user")?.content || "";
 
     if (!lastUser.trim()) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "El mensaje está vacío o no es válido." });
+      return res.status(400).json({ ok: false, error: "El mensaje está vacío." });
     }
 
-    const attachSummary =
-      Array.isArray(attachments) && attachments.length
-        ? `El usuario adjuntó ${attachments.length} archivo(s): ${attachments
-            .map((a) => a.name || a.filename || "archivo")
-            .join(", ")}.`
-        : "No hay adjuntos.";
+    const attachSummary = Array.isArray(attachments) && attachments.length
+      ? `El usuario adjuntó ${attachments.length} archivo(s): ${attachments.map(a => a?.name || a?.filename || "archivo").join(", ")}.`
+      : "No hay adjuntos.";
 
     const systemInstruction = `Sos un asistente experto en clasificación arancelaria (HS/NCM).
 - Pedí datos clave si faltan: material, uso, presentación, si es parte o artículo completo, si viene en kit o armado, medidas/peso, contexto de uso.
-- Si podés, proponé 1-3 códigos (capítulo/partida/subpartida) con justificación breve.
-- Indicá si hay notas legales o reglas generales del SA relevantes.
+- Proponé 1–3 códigos HS/NCM con justificación breve y notas legales relevantes.
 - Responde claro, en español rioplatense. ${attachSummary}`;
 
-    // Llamar al modelo
     const reply = await askGemini(systemInstruction, String(lastUser));
-
     res.json({ ok: true, reply });
   } catch (err) {
-    console.error("❌ Error general:", err);
-    res
-      .status(500)
-      .json({ ok: false, error: err.message || "Error interno del servidor." });
+    console.error("❌ Error /api/chat:", err);
+    res.status(500).json({ ok: false, error: err.message || "Error interno." });
   }
 });
 
 export default router;
+
 
