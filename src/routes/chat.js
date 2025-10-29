@@ -10,7 +10,7 @@ async function askGemini(systemInstruction, userText) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("⚠️ GEMINI_API_KEY no configurada en Render.");
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${apiKey}`;
 
   const prompt = `${systemInstruction}
 
